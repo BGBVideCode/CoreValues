@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BGB Group - Values Discovery Quiz</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* Dark gray background */
+        }
+        #bg-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+        }
+        #quiz-container {
+            position: relative;
+            z-index: 1;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        #progressFill {
+            background-image: linear-gradient(to right, #A9A9A9, #ffff00);
+            transition: width 0.4s ease-in-out;
+            position: relative;
+            overflow: hidden;
+        }
+        /* Animated sheen effect for the progress bar and profile bar */
+        #progressFill::after, .bg-yellow-gradient::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(
+                110deg,
+                rgba(255, 255, 255, 0) 40%,
+                rgba(255, 255, 255, 0.5) 50%,
+                rgba(255, 255, 255, 0) 60%
+            );
+            animation: progress-sheen 2s linear infinite;
+        }
+        @keyframes progress-sheen {
+            0% {
+                transform: translateX(-100%);
+            }
+            100% {
+                transform: translateX(100%);
+            }
+        }
+        .answer-option:focus-visible, .btn:focus-visible {
+            outline: 3px solid #e6e600;
+            outline-offset: 2px;
+        }
+        .bg-brand-yellow { background-color: #ffff00; }
+        .border-brand-yellow { border-color: #ffff00; }
+        .text-brand-yellow { color: #ffff00; }
+        .hover\:bg-brand-yellow-dark:hover { background-color: #e6e600; }
+        
+        .confetti {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: #ffff00;
+            opacity: 0.7;
+            border-radius: 50%;
+        }
+        .profile-bar-fill {
+            transition: width 1s ease-out;
+        }
+        .description-panel {
+            transition: all 0.3s ease-in-out;
+            max-height: 0;
+            overflow: hidden;
+        }
+        .description-panel.open {
+            max-height: 500px; /* Large enough for content */
+        }
+        .bg-yellow-gradient {
+            background-image: linear-gradient(to bottom, #ffff00, #e6e600); /* From #ffff00 to a cooler, darker yellow */
+            position: relative;
+            overflow: hidden;
+        }
+        /* For screen readers */
+        .sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border-width: 0;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <canvas id="bg-canvas"></canvas>
+
+    <div id="quiz-container" class="w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden">
+        
+        <div id="progress-bar" class="w-full bg-gray-300 h-2.5 hidden" aria-hidden="true">
+            <div id="progressFill" class="h-2.5" style="width: 0%;"></div>
+        </div>
+
+        <main id="main-content" class="p-6 md:p-10" aria-live="polite">
+            <!-- Welcome Screen -->
+            <section id="welcome-container" class="text-center fade-in" aria-labelledby="welcome-heading">
+                 <div class="h-24 flex items-center justify-center">
+                    <h1 id="welcome-question" class="text-2xl md:text-3xl font-bold text-gray-900 max-w-md mx-auto transition-opacity duration-500 ease-in-out"></h1>
+                 </div>
+                 <h2 id="welcome-heading" class="text-lg font-medium text-gray-700 mt-4">Discover Your Core Value</h2>
+                 <p class="text-gray-500 mt-2 max-w-md mx-auto text-sm">Take this short quiz to find out which value resonates most and get a custom wallpaper.</p>
+                 <button id="startBtn" class="btn mt-8 w-full sm:w-auto bg-brand-yellow text-black font-bold py-3 px-6 rounded-lg hover:bg-brand-yellow-dark transition-transform hover:scale-105 border-2 border-gray-800 shadow-lg">Start Quiz</button>
+            </section>
+
+            <section id="quiz-section" class="hidden">
+                 <div id="quiz-header" class="text-center mb-8">
+                    <h1 class="text-2xl md:text-3xl font-bold text-gray-900">Discover which of our core values resonates most with you.</h1>
+                </div>
+                <div id="quiz-content"></div>
+            </section>
+
+            <section id="results-container" class="hidden text-center fade-in" aria-labelledby="results-heading"></section>
+        </main>
+    </div>
+
+    <script>
+        // --- THREE.JS BACKGROUND SETUP ---
+        let scene, camera, renderer, stars, mouse;
+
+        function initThreeJS() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 1000);
+            camera.position.z = 1;
+            camera.rotation.x = Math.PI / 2;
+
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('bg-canvas'), alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 0);
+
+            const starGeo = new THREE.BufferGeometry();
+            const starCount = 6000;
+            const positions = new Float32Array(starCount * 3);
+            for (let i = 0; i < starCount * 3; i++) {
+                positions[i] = (Math.random() - 0.5) * 600;
+            }
+            starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            
+            let sprite = new THREE.TextureLoader().load('https://placehold.co/16x16/ffff00/ffff00.png');
+            let starMaterial = new THREE.PointsMaterial({ color: 0xffff00, size: 0.7, map: sprite });
+
+            stars = new THREE.Points(starGeo, starMaterial);
+            scene.add(stars);
+
+            mouse = new THREE.Vector2();
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('resize', onWindowResize);
+
+            animate();
+        }
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            stars.position.y -= 0.04;
+            if (stars.position.y < -200) { stars.position.y = 200; }
+            camera.position.x += (mouse.x * 0.2 - camera.position.x) * 0.01;
+            camera.position.y += (-mouse.y * 0.2 - camera.position.y) * 0.01;
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        // --- QUIZ DATA & CONFIGURATION ---
+        const quizData = {
+            questions: [
+                {
+                    id: "q1",
+                    text: "When a critical business challenge emerges, your first instinct is to:",
+                    answers: [
+                        { text: "Take immediate action and mobilize resources quickly", value: "escalator" },
+                        { text: "Focus on how to create the best possible experience for stakeholders", value: "client" },
+                        { text: "Consider the broader impact and long-term significance", value: "matter" },
+                        { text: "Connect with empathy and understand the human element", value: "heart" }
+                    ]
+                },
+                {
+                    id: "q2",
+                    text: "What drives you most in your professional work?",
+                    answers: [
+                        { text: "Being the catalyst that makes things happen and drives momentum", value: "escalator" },
+                        { text: "Creating moments of surprise, delight, and expanded possibilities", value: "client" },
+                        { text: "Bringing focus and intention to what's truly important and valuable", value: "matter" },
+                        { text: "Building authentic relationships grounded in truth and kindness", value: "heart" }
+                    ]
+                },
+                 {
+                    id: "q3",
+                    text: "How do you approach client relationships?",
+                    answers: [
+                        { text: "With urgency and proactive solutions that move them forward", value: "escalator" },
+                        { text: "By striving to be the highlight of their day with great partnership", value: "client" },
+                        { text: "By focusing on where our work will make the biggest difference", value: "matter" },
+                        { text: "With honest communication, kindness, and genuine care", value: "heart" }
+                    ]
+                },
+                {
+                    id: "q4",
+                    text: "In team meetings, you're known for:",
+                    answers: [
+                        { text: "Driving action and ensuring momentum doesn't stall", value: "escalator" },
+                        { text: "Bringing good thinking and positive energy that elevates everyone", value: "client" },
+                        { text: "Keeping discussions focused on meaningful, high-impact outcomes", value: "matter" },
+                        { text: "Speaking truth with kindness and creating space for everyone", value: "heart" }
+                    ]
+                },
+                {
+                    id: "q5",
+                    text: "Your colleagues would say your greatest strength is:",
+                    answers: [
+                        { text: "\"They make greatness happen every single day\"", value: "escalator" },
+                        { text: "\"They expand what we thought was possible\"", value: "client" },
+                        { text: "\"They know what matters and focus our energy there\"", value: "matter" },
+                        { text: "\"They bring humanity and grace to everything they do\"", value: "heart" }
+                    ]
+                }
+            ],
+            values: {
+                escalator: { 
+                    title: "Do you run up the escalator?",
+                    wallpaperTitle: "We Run Up The Escalator",
+                    shortTitle: "Run Up Escalator",
+                    imageName: "escalator.jpg",
+                    description: "Do you believe every day is a chance to make greatness happen? That it's an opportunity to put your talents, passion, and ingenuity into action to move brands, clients, and people forward? If you don't wait for moments to come, but run to them, this is you.", 
+                    colors: ['#000000', '#404040'] 
+                },
+                client: { 
+                    title: "Are you the best part of your client's day?",
+                    wallpaperTitle: "We Are The Best Part Of Our Client's Day",
+                    shortTitle: "Best Part of Day",
+                    imageName: "clients.jpg",
+                    description: "Are you after something more meaningful than just 'servicing' clients? Do you look for the chance to delight, surprise, and expand the horizons of what's possible? If you strive to be the one meeting in your client's day that's full of good thinking, great partnership, and even better vibes, this is you.", 
+                    colors: ['#404040', '#808080'] 
+                },
+                matter: { 
+                    title: "Do you do things that matter?",
+                    wallpaperTitle: "We Do Things That Matter",
+                    shortTitle: "Things That Matter",
+                    imageName: "matter.jpg",
+                    description: "In a world that's accelerating and becoming unclear, is your greatest weapon focus? Do you bring intention and a clear-eyed understanding of what's important and valuable? If you know what matters and do things that matter with your whole heart and mind, this is you.", 
+                    colors: ['#000000', '#808080'] 
+                },
+                heart: { 
+                    title: "Are you open-hearted?",
+                    wallpaperTitle: "We Are Open-Hearted",
+                    shortTitle: "Open-Hearted",
+                    imageName: "openhearted.jpg",
+                    description: "Do you have an open-door policy to humanity? Do you speak the truth to colleagues and clients because you know it's the only way to get to the best results? If you believe everyone is deserving of kindness, gratitude, and grace, and you make room for that in everything you do, this is you.", 
+                    colors: ['#404040', '#000000'] 
+                }
+            }
+        };
+
+        // --- STATE & DOM ELEMENTS ---
+        let currentQuestionIndex = 0;
+        let userAnswers = {};
+        const welcomeContainerEl = document.getElementById('welcome-container');
+        const startBtnEl = document.getElementById('startBtn');
+        const quizSectionEl = document.getElementById('quiz-section');
+        const quizContentEl = document.getElementById('quiz-content');
+        const resultsContainerEl = document.getElementById('results-container');
+        const progressFillEl = document.getElementById('progressFill');
+        const progressBarEl = document.getElementById('progress-bar');
+        const quizHeaderEl = document.getElementById('quiz-header');
+        const welcomeQuestionEl = document.getElementById('welcome-question');
+        let welcomeInterval;
+        let synth;
+
+        // --- HELPER FUNCTIONS ---
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        // --- CORE FUNCTIONS ---
+        function startQuiz() {
+            clearInterval(welcomeInterval);
+            welcomeContainerEl.classList.add('hidden');
+            quizSectionEl.classList.remove('hidden');
+            progressBarEl.classList.remove('hidden');
+            renderQuiz();
+        }
+
+        function renderQuiz() {
+            if (currentQuestionIndex < quizData.questions.length) {
+                renderQuestion();
+            } else {
+                renderResults();
+            }
+            updateProgress();
+        }
+
+        function renderQuestion() {
+            const question = quizData.questions[currentQuestionIndex];
+            const savedAnswer = userAnswers[currentQuestionIndex];
+            const randomizedAnswers = shuffleArray([...question.answers]);
+
+            quizContentEl.innerHTML = `
+                <div class="question-container fade-in text-center" role="group" aria-labelledby="question-text-${question.id}">
+                    <span class="bg-gray-200 text-gray-700 text-xs font-bold py-1 px-3 rounded-full inline-block mb-4">Question ${currentQuestionIndex + 1} of ${quizData.questions.length}</span>
+                    <h2 id="question-text-${question.id}" class="text-lg md:text-xl font-semibold text-gray-800 mb-6">
+                        ${question.text}
+                    </h2>
+                    <div class="answers grid grid-cols-1 gap-4" role="radiogroup" aria-labelledby="question-text-${question.id}">
+                        ${randomizedAnswers.map(answer => `
+                            <div 
+                                class="answer-option border-2 ${savedAnswer === answer.value ? 'border-brand-yellow bg-yellow-100' : 'border-gray-300 bg-white'} rounded-lg p-4 cursor-pointer transition-all duration-200 hover:border-brand-yellow hover:bg-yellow-100"
+                                tabindex="0" role="radio" aria-checked="${savedAnswer === answer.value}" data-value="${answer.value}"
+                            >
+                                <p class="font-semibold text-gray-900">${answer.text}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="controls flex justify-between items-center mt-8">
+                        <button id="prevBtn" class="btn bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-lg hover:bg-gray-300 transition-colors ${currentQuestionIndex === 0 ? 'invisible' : ''}">Previous</button>
+                    </div>
+                </div>
+            `;
+            document.querySelector('.answers').addEventListener('click', handleAnswerClick);
+            document.querySelector('#prevBtn')?.addEventListener('click', previousQuestion);
+            document.querySelector('.answers').addEventListener('keydown', (e) => {
+                if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('answer-option')) {
+                    e.preventDefault();
+                    handleAnswerSelection(e.target);
+                }
+            });
+        }
+        
+        function renderResults() {
+            const scores = calculateScores();
+            const topValue = Object.keys(scores).reduce((a, b) => scores[a] > scores[b] ? a : b);
+            const resultData = quizData.values[topValue];
+
+            quizSectionEl.classList.add('hidden');
+            progressBarEl.classList.add('hidden');
+            resultsContainerEl.classList.remove('hidden');
+            resultsContainerEl.innerHTML = `
+                <h2 id="results-heading" class="text-2xl md:text-3xl font-bold text-gray-900 mb-8">${resultData.wallpaperTitle}</h2>
+                
+                <div id="value-profile-section" class="my-8">
+                    <h3 class="text-xl font-bold text-gray-800 mb-6">Your Value Profile</h3>
+                    <div id="value-profile-chart" class="space-y-4 text-left">
+                        ${renderValueProfile(scores, topValue)}
+                    </div>
+                </div>
+
+                <p class="text-gray-600 mt-8 max-w-lg mx-auto text-left leading-relaxed border-t border-gray-200 pt-8">${resultData.description}</p>
+                
+                <div class="wallpaper-preview my-8 w-[400px] h-[225px] mx-auto rounded-lg shadow-xl overflow-hidden border-4 border-gray-200">
+                    <img src="${resultData.imageName}" alt="${resultData.wallpaperTitle} Wallpaper Preview" class="w-full h-full object-cover">
+                </div>
+                
+                <div class="flex flex-col sm:flex-row gap-4 justify-center">
+                    <button id="downloadBtn" class="btn w-full sm:w-auto bg-brand-yellow text-black font-bold py-3 px-6 rounded-lg hover:bg-brand-yellow-dark transition-transform hover:scale-105 border-2 border-gray-800 shadow-lg">Download Your Wallpaper</button>
+                    <button id="shareBtn" class="btn w-full sm:w-auto bg-gray-800 text-white font-bold py-3 px-6 rounded-lg hover:bg-black transition-transform hover:scale-105">Share Your Result</button>
+                </div>
+
+                <div class="all-wallpapers-section mt-12 pt-8 border-t border-gray-200">
+                    <h3 class="text-xl font-bold text-gray-800 mb-6">Or, Download Any BGB Value Wallpaper</h3>
+                    <div id="wallpaper-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        ${Object.keys(quizData.values).map(key => renderMiniWallpaper(key)).join('')}
+                    </div>
+                </div>
+                <button id="restartBtn" class="btn mt-10 w-full sm:w-auto bg-brand-yellow text-black font-bold py-3 px-6 rounded-lg hover:bg-brand-yellow-dark transition-transform hover:scale-105 border-2 border-gray-800 shadow-lg">Retake Quiz</button>
+            `;
+            triggerConfetti();
+            
+            document.querySelectorAll('.profile-bar-fill').forEach(bar => {
+                const width = bar.dataset.width;
+                setTimeout(() => bar.style.width = width, 100);
+            });
+
+            resultsContainerEl.addEventListener('click', (e) => {
+                const downloadBtn = e.target.closest('#downloadBtn');
+                const restartBtn = e.target.closest('#restartBtn');
+                const shareBtn = e.target.closest('#shareBtn');
+                const downloadMiniBtn = e.target.closest('.download-mini-btn');
+                const learnMoreBtn = e.target.closest('.learn-more-btn');
+
+                if (downloadBtn) downloadWallpaper(topValue);
+                if (restartBtn) restartQuiz();
+                if (shareBtn) shareQuiz(topValue);
+                if (downloadMiniBtn) downloadWallpaper(downloadMiniBtn.dataset.value);
+                if (learnMoreBtn) {
+                    const targetSelector = learnMoreBtn.dataset.target;
+                    const descPanel = document.querySelector(targetSelector);
+                    if (descPanel) {
+                        descPanel.classList.toggle('open');
+                        descPanel.classList.toggle('p-4');
+                        descPanel.classList.toggle('mt-2');
+                    }
+                }
+            });
+        }
+        
+        function renderValueProfile(scores, topValue) {
+            const totalQuestions = quizData.questions.length;
+            const sortedValues = Object.keys(scores).sort((a, b) => scores[b] - scores[a]);
+
+            return sortedValues.map(key => {
+                const score = scores[key];
+                const percentage = (score / totalQuestions) * 100;
+                const valueData = quizData.values[key];
+                const isTopValue = key === topValue;
+                const percentageText = percentage > 0 ? `${Math.round(percentage)}%` : '';
+
+                return `
+                    <div class="flex items-center gap-4">
+                        <div class="w-1/3 text-sm sm:text-base font-semibold text-gray-700">${valueData.shortTitle}</div>
+                        <div class="w-2/3 bg-gray-200 rounded-full h-6">
+                            <div 
+                                class="profile-bar-fill h-6 rounded-full flex items-center justify-end pr-2 text-xs font-bold ${isTopValue ? 'bg-yellow-gradient text-black' : 'bg-gray-400 text-white'}" 
+                                style="width: 0%;"
+                                data-width="${percentage}%"
+                            >
+                                ${percentageText}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderMiniWallpaper(valueType) {
+            const valueData = quizData.values[valueType];
+            return `
+                <div class="wallpaper-option p-4 border border-gray-200 rounded-lg bg-white shadow-sm">
+                    <div class="text-center">
+                        <div class="mini-wallpaper w-full h-36 rounded-md mb-3 overflow-hidden bg-gray-800">
+                             <img src="${valueData.imageName}" alt="${valueData.wallpaperTitle} wallpaper preview" class="w-full h-full object-cover">
+                        </div>
+                        <h4 class="font-semibold text-sm text-gray-800">${valueData.wallpaperTitle}</h4>
+                    </div>
+                    <div class="flex items-center gap-2 mt-3">
+                        <button class="btn download-mini-btn w-full bg-gray-800 text-white text-sm font-semibold py-2 px-3 rounded-md hover:bg-black transition-colors" data-value="${valueType}">Download</button>
+                        <button class="btn learn-more-btn bg-gray-200 text-gray-600 rounded-full p-1.5 h-8 w-8 flex-shrink-0 flex items-center justify-center hover:bg-gray-300" data-target="#desc-${valueType}" aria-label="Learn More">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="desc-${valueType}" class="description-panel text-left text-sm text-gray-600 bg-gray-50 rounded-md">
+                        ${valueData.description}
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- EVENT HANDLERS & LOGIC ---
+        function handleAnswerClick(e) {
+            const selectedOption = e.target.closest('.answer-option');
+            if (selectedOption) handleAnswerSelection(selectedOption);
+        }
+
+        function handleAnswerSelection(selectedOption) {
+            userAnswers[currentQuestionIndex] = selectedOption.dataset.value;
+            setTimeout(() => {
+                currentQuestionIndex++;
+                renderQuiz();
+            }, 300);
+            document.querySelectorAll('.answer-option').forEach(opt => {
+                opt.classList.remove('border-brand-yellow', 'bg-yellow-100');
+                opt.classList.add('border-gray-300');
+            });
+            selectedOption.classList.add('border-brand-yellow', 'bg-yellow-100');
+            selectedOption.classList.remove('border-gray-300');
+        }
+
+        function previousQuestion() {
+            if (currentQuestionIndex > 0) {
+                currentQuestionIndex--;
+                renderQuiz();
+            }
+        }
+
+        function calculateScores() {
+            const scores = { escalator: 0, client: 0, matter: 0, heart: 0 };
+            Object.values(userAnswers).forEach(answer => {
+                if (scores[answer] !== undefined) scores[answer]++;
+            });
+            return scores;
+        }
+        
+        function restartQuiz() {
+            currentQuestionIndex = 0;
+            userAnswers = {};
+            resultsContainerEl.classList.add('hidden');
+            resultsContainerEl.innerHTML = '';
+            quizSectionEl.classList.remove('hidden');
+            progressBarEl.classList.remove('hidden');
+            renderQuiz();
+        }
+
+        function updateProgress() {
+            progressFillEl.style.width = `${(currentQuestionIndex / quizData.questions.length) * 100}%`;
+        }
+        
+        // --- WALLPAPER & EFFECTS ---
+        function downloadWallpaper(valueType) {
+            const valueData = quizData.values[valueType];
+            window.open(valueData.imageName, '_blank');
+        }
+
+        async function shareQuiz(topValue) {
+            const resultData = quizData.values[topValue];
+            const shareData = {
+                title: 'BGB Group Values Quiz',
+                text: `I took the BGB Values Quiz and my core value is "${resultData.wallpaperTitle}"! Discover yours.`,
+                url: window.location.href
+            };
+
+            if (navigator.share) {
+                try {
+                    await navigator.share(shareData);
+                } catch (err) {
+                    console.error("Error sharing:", err);
+                }
+            } else {
+                // Fallback for desktop: copy link
+                const shareBtn = document.getElementById('shareBtn');
+                const originalText = shareBtn.textContent;
+                try {
+                    const dummy = document.createElement('textarea');
+                    document.body.appendChild(dummy);
+                    dummy.value = shareData.url;
+                    dummy.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(dummy);
+                    
+                    shareBtn.textContent = 'Link Copied!';
+                    setTimeout(() => {
+                        shareBtn.textContent = originalText;
+                    }, 2000);
+
+                } catch (err) {
+                    console.error('Fallback copy error:', err);
+                    shareBtn.textContent = 'Error Copying';
+                     setTimeout(() => {
+                        shareBtn.textContent = originalText;
+                    }, 2000);
+                }
+            }
+        }
+
+        function triggerConfetti() {
+            synth.triggerAttackRelease(["C5", "E5", "G5"], "16n", undefined, 0.3);
+            const container = document.getElementById('quiz-container');
+            for (let i = 0; i < 100; i++) {
+                const confetti = document.createElement('div');
+                confetti.classList.add('confetti');
+                const x = Math.random() * container.offsetWidth;
+                const y = Math.random() * container.offsetHeight - container.offsetHeight;
+                confetti.style.left = `${x}px`;
+                confetti.style.top = `${y}px`;
+                const size = Math.random() * 8 + 5;
+                confetti.style.width = `${size}px`;
+                confetti.style.height = `${size}px`;
+                const bg = Math.random() > 0.3 ? '#ffff00' : '#ffffff';
+                confetti.style.backgroundColor = bg;
+
+                container.appendChild(confetti);
+
+                confetti.animate([
+                    { transform: `translateY(0px) rotate(0deg)`, opacity: 1 },
+                    { transform: `translateY(${container.offsetHeight + 20}px) rotate(${Math.random() * 360}deg)`, opacity: 0 }
+                ], {
+                    duration: Math.random() * 3000 + 4000,
+                    easing: 'ease-out',
+                    delay: Math.random() * 1000,
+                }).onfinish = () => confetti.remove();
+            }
+        }
+
+        function initWelcomeScreenAnimation() {
+            let valueKeys = Object.keys(quizData.values);
+            let currentWelcomeIndex = 0;
+
+            function showNextWelcomeQuestion() {
+                welcomeQuestionEl.style.opacity = 0;
+                setTimeout(() => {
+                    welcomeQuestionEl.textContent = quizData.values[valueKeys[currentWelcomeIndex]].title;
+                    welcomeQuestionEl.style.opacity = 1;
+                    currentWelcomeIndex = (currentWelcomeIndex + 1) % valueKeys.length;
+                }, 500); // Wait for fade out
+            }
+            showNextWelcomeQuestion();
+            welcomeInterval = setInterval(showNextWelcomeQuestion, 4000);
+        }
+
+        // --- INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', () => {
+            initThreeJS();
+            initWelcomeScreenAnimation();
+            
+            // Initialize sound synth
+            synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.005, decay: 0.1, sustain: 0.1, release: 0.2 }
+            }).toDestination();
+
+            startBtnEl.addEventListener('click', () => {
+                // Start audio context on user interaction
+                Tone.start();
+                startQuiz();
+            });
+            
+            // --- DYNAMIC TAB TITLE SCRIPT ---
+            const originalTitle = document.title;
+            const marqueeMessage = '😢 Come back to share your values! Don\'t let your curiosity fade away... ';
+            const paddedMessage = marqueeMessage + ' '.repeat(10) + marqueeMessage;
+            let titleInterval;
+            let marqueePosition = 0;
+
+            function updateMarqueeTitle() {
+                const windowSize = 50;
+                const displayText = paddedMessage.substring(marqueePosition, marqueePosition + windowSize);
+                document.title = displayText;
+                marqueePosition++;
+                if (marqueePosition >= marqueeMessage.length + 10) {
+                    marqueePosition = 0;
+                }
+            }
+
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden) {
+                    if (!titleInterval) {
+                        marqueePosition = 0;
+                        titleInterval = setInterval(updateMarqueeTitle, 200);
+                    }
+                } else {
+                    if (titleInterval) {
+                        clearInterval(titleInterval);
+                        titleInterval = null;
+                        document.title = originalTitle;
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
